@@ -48,8 +48,11 @@ def hash_pw(pw,salt=None):
     salt=salt or secrets.token_hex(16); digest=hashlib.pbkdf2_hmac('sha256',pw.encode(),salt.encode(),180000).hex(); return salt+'$'+digest
 def verify_pw(pw,stored):
     try:
-        salt,digest=stored.split('',1);returnhmac.comparedigest(hashpw(pw,salt).split('',1)[1],digest)
-    except Exception:return False
+        salt,digest=stored.split('$',1)
+        calculated_digest=hashlib.pbkdf2_hmac('sha256',pw.encode(),salt.encode(),180000).hex()
+        return hmac.compare_digest(calculated_digest,digest)
+    except (AttributeError, ValueError, TypeError):
+        return False
 
 @st.cache_resource(show_spinner="Preparing CSR database...")
 def init_db():
