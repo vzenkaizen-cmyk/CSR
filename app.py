@@ -48,8 +48,10 @@ def hash_pw(pw,salt=None):
     salt=salt or secrets.token_hex(16); digest=hashlib.pbkdf2_hmac('sha256',pw.encode(),salt.encode(),180000).hex(); return salt+'$'+digest
 def verify_pw(pw,stored):
     try:
-        salt,digest=stored.split('',1);returnhmac.comparedigest(hashpw(pw,salt).split('',1)[1],digest)
-    except Exception:return False
+        salt,digest=stored.split('$',1)
+        return hmac.compare_digest(hash_pw(pw,salt).split('$',1)[1],digest)
+    except Exception:
+        return False
 
 @st.cache_resource(show_spinner="Preparing CSR database...")
 def init_db():
@@ -199,15 +201,6 @@ def login_page():
             users=df('SELECT username,password_hash,role FROM users WHERE username=:u',{'u':u.strip()})
             if not users.empty and verify_pw(p,users.iloc[0].password_hash): st.session_state.user={'username':u.strip(),'role':users.iloc[0].role};st.rerun()
             else: st.error('Incorrect username or password.')
-        with st.expander('Create account'):
-            with st.form('create_account'):
-                nu=st.text_input('Choose username'); np=st.text_input('Create password',type='password'); np2=st.text_input('Confirm password',type='password'); create=st.form_submit_button('Create account',use_container_width=True)
-            if create:
-                if not nu.strip() or len(np)<8: st.error('Enter a username and a password with at least 8 characters.')
-                elif np!=np2:st.error('Passwords do not match.')
-                elif not df('SELECT id FROM users WHERE username=:u',{'u':nu.strip()}).empty:st.error('That username already exists.')
-                else:
-                    run('INSERT INTO users(username,password_hash,role,created_at) VALUES(:u,:p,:r,:d)',{'u':nu.strip(),'p':hash_pw(np),'r':'user','d':datetime.now().isoformat(timespec='seconds')});st.success('Account created. Sign in with your new credentials.')
         st.markdown('</div>',unsafe_allow_html=True)
 
 if 'user' not in st.session_state:
