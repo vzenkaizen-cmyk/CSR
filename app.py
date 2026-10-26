@@ -60,7 +60,9 @@ def init_db():
     f'''CREATE TABLE IF NOT EXISTS payments (id {pk}, payment_date TEXT NOT NULL, program TEXT NOT NULL, category TEXT NOT NULL, subcategory TEXT, site TEXT NOT NULL, payment_purpose TEXT NOT NULL, description TEXT, recipient TEXT, amount REAL NOT NULL, payment_type TEXT NOT NULL, bank_name TEXT, bank_branch TEXT, account_holder TEXT, account_number TEXT, reference_no TEXT, status TEXT NOT NULL DEFAULT 'Pending', created_by TEXT NOT NULL, created_at TEXT NOT NULL)''',
     f'''CREATE TABLE IF NOT EXISTS approvals (id {pk}, item_type TEXT NOT NULL, item_id INTEGER NOT NULL, requested_by TEXT NOT NULL, approver TEXT, decision TEXT NOT NULL DEFAULT 'Pending', comments TEXT, decision_date TEXT, created_at TEXT NOT NULL)''',
     f'''CREATE TABLE IF NOT EXISTS nursery (id {pk}, site TEXT NOT NULL, plant_name TEXT NOT NULL, quantity INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, updated_by TEXT NOT NULL, UNIQUE(site,plant_name))''',
-    f'''CREATE TABLE IF NOT EXISTS planting (id {pk}, site TEXT NOT NULL, planted_date TEXT NOT NULL, location TEXT, plant_name TEXT NOT NULL, quantity INTEGER NOT NULL, source_type TEXT NOT NULL, unit_cost REAL NOT NULL DEFAULT 0, total_cost REAL NOT NULL DEFAULT 0, notes TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL)'''
+    f'''CREATE TABLE IF NOT EXISTS planting (id {pk}, site TEXT NOT NULL, planted_date TEXT NOT NULL, location TEXT, plant_name TEXT NOT NULL, quantity INTEGER NOT NULL, source_type TEXT NOT NULL, unit_cost REAL NOT NULL DEFAULT 0, total_cost REAL NOT NULL DEFAULT 0, notes TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL)''',
+    f'''CREATE TABLE IF NOT EXISTS scholarships (id {pk}, reference_no TEXT UNIQUE NOT NULL, funding_source TEXT NOT NULL, student_name TEXT NOT NULL, student_id TEXT, school_or_university TEXT, contact TEXT, scholarship_category TEXT NOT NULL, monthly_amount REAL NOT NULL, start_date TEXT NOT NULL, installment_count INTEGER NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL)''',
+    f'''CREATE TABLE IF NOT EXISTS scholarship_installments (id {pk}, scholarship_id INTEGER NOT NULL, installment_no INTEGER NOT NULL, due_date TEXT NOT NULL, amount REAL NOT NULL, status TEXT NOT NULL DEFAULT 'Pending', paid_date TEXT, payment_reference TEXT, UNIQUE(scholarship_id,installment_no))'''
     ]
     for s in stmts:
         run(s)
@@ -299,6 +301,93 @@ elif page in PROGRAMS or page in ['Daruwanta Diriyak','Ratata Sewanak','Gamata E
                     run('INSERT INTO payments(payment_date,program,category,site,payment_purpose,description,recipient,amount,payment_type,bank_name,bank_branch,account_holder,account_number,reference_no,status,created_by,created_at) VALUES(:d,:p,:c,:s,:pu,:de,:r,:a,:pt,:b,:br,:h,:ac,:ref,:st,:u,:now)', {'d':one_date.isoformat(),'p':prog,'c':one_cat,'s':one_site,'pu':one_purpose or one_cat,'de':one_purpose,'r':one_recipient,'a':one_amount,'pt':'One-time payment - '+one_type,'b':one_bank,'br':one_branch,'h':one_holder,'ac':one_account,'ref':one_ref,'st':'Pending','u':user['username'],'now':datetime.now().isoformat(timespec='seconds')})
                     pid=int(df('SELECT MAX(id) id FROM payments').iloc[0].id); run('INSERT INTO approvals(item_type,item_id,requested_by,decision,created_at) VALUES(:t,:i,:u,:d,:now)', {'t':'payment','i':pid,'u':user['username'],'d':'Pending','now':datetime.now().isoformat(timespec='seconds')})
                     st.success('One-time payment submitted for approval.'); st.rerun()
+
+    if prog == 'Vidu Saviya':
+        st.divider()
+        st.subheader('Scholarship register and monthly payments')
+        st.caption('April and August are excluded from the payment schedule. Each scholarship is registered separately, so one student can have more than one reference number.')
+        funding_options = ['Vidullanka', 'Other companies', 'Vidul Biomass and Vidul Plantation']
+        scholarship_categories = ['Grade 5 Scholarship', "O/L passed with 9A's", 'University Selection']
+        category_meta = {'Grade 5 Scholarship': ('VLL-SH', 3000.0, 60), "O/L passed with 9A's": ('VLL-OL', 3500.0, 20), 'University Selection': ('VLL-UN', 3500.0, 40)}
+        with st.form('scholarship_register_form'):
+            a,b,c = st.columns(3)
+            funding_source = a.selectbox('Scholarship funding source', funding_options)
+            scholarship_category = b.selectbox('Scholarship category', scholarship_categories)
+            student_name = c.text_input('Student full name')
+            d,e,f = st.columns(3)
+            student_id = d.text_input('Student ID / NIC (optional)')
+            institution = e.text_input('School / university')
+            contact = f.text_input('Contact number (optional)')
+            start_date = st.date_input('First eligible payment month', date.today().replace(day=1))
+            monthly_amount = st.number_input('Monthly payment (LKR)', min_value=0.0, step=500.0, value=category_meta[scholarship_category][1])
+            register = st.form_submit_button('Register scholarship')
+        if register:
+            if not student_name.strip():
+                st.error('Enter the student full name.')
+            elif monthly_amount <= 0:
+                st.error('Monthly payment must be greater than zero.')
+            else:
+                prefix, default_amount, installment_count = category_meta[scholarship_category]
+                existing = df('SELECT reference_no FROM scholarships WHERE reference_no LIKE :prefix', {'prefix': prefix+'-%'})
+                nums = []
+                for value in existing.get('reference_no', pd.Series(dtype=str)).astype(str):
+                    try: nums.append(int(value.rsplit('-',1)[1]))
+                    except Exception: pass
+                reference_no = f'{prefix}-{(max(nums) if nums else 0)+1:03d}'
+                run('INSERT INTO scholarships(reference_no,funding_source,student_name,student_id,school_or_university,contact,scholarship_category,monthly_amount,start_date,installment_count,created_by,created_at) VALUES(:ref,:fund,:name,:sid,:inst,:contact,:cat,:amount,:start,:count,:user,:now)',
+                    {'ref':reference_no,'fund':funding_source,'name':student_name.strip(),'sid':student_id.strip(),'inst':institution.strip(),'contact':contact.strip(),'cat':scholarship_category,'amount':float(monthly_amount),'start':start_date.isoformat(),'count':installment_count,'user':user['username'],'now':datetime.now().isoformat(timespec='seconds')})
+                scholarship_id = int(df('SELECT id FROM scholarships WHERE reference_no=:ref', {'ref':reference_no}).iloc[0].id)
+                yy, mm, created = start_date.year, start_date.month, 0
+                while created < installment_count:
+                    if mm not in (4, 8):
+                        run('INSERT INTO scholarship_installments(scholarship_id,installment_no,due_date,amount,status) VALUES(:sid,:no,:due,:amount,:status)',
+                            {'sid':scholarship_id,'no':created+1,'due':date(yy,mm,1).isoformat(),'amount':float(monthly_amount),'status':'Pending'})
+                        created += 1
+                    mm += 1
+                    if mm > 12: mm = 1; yy += 1
+                st.success(f'Scholarship registered: {reference_no}. {installment_count} scheduled payments created.')
+                st.rerun()
+        scholarships = df('SELECT id,reference_no,funding_source,student_name,student_id,school_or_university,scholarship_category,monthly_amount,start_date,installment_count FROM scholarships ORDER BY funding_source,student_name')
+        st.subheader('Scholarship records')
+        if scholarships.empty:
+            st.info('No scholarships have been registered yet.')
+        else:
+            for idx, source_name in enumerate(funding_options, start=1):
+                source_rows = scholarships[scholarships.funding_source == source_name]
+                if not source_rows.empty:
+                    st.markdown(f'**{source_name}**')
+                    st.dataframe(source_rows.drop(columns=['id']), use_container_width=True, hide_index=True)
+            chosen_ref = st.selectbox('Select scholarship reference', scholarships.reference_no.tolist(), key='scholarship_selected_ref')
+            selected_scholarship = scholarships[scholarships.reference_no == chosen_ref].iloc[0]
+            installments = df('SELECT installment_no,due_date,amount,status,paid_date,payment_reference FROM scholarship_installments WHERE scholarship_id=:sid ORDER BY installment_no', {'sid':int(selected_scholarship.id)})
+            st.subheader(f'Payment schedule · {chosen_ref}')
+            st.dataframe(installments.style.format({'amount':'LKR {:,.2f}'}), use_container_width=True, hide_index=True)
+            pending_installments = installments[installments.status == 'Pending']
+            if not pending_installments.empty:
+                with st.form('scholarship_installment_paid'):
+                    opts = [f"#{int(r.installment_no)} · {r.due_date} · {money(r.amount)}" for _,r in pending_installments.iterrows()]
+                    selected_installment = st.selectbox('Mark installment as paid', opts)
+                    paid_date = st.date_input('Actual payment date', date.today())
+                    payment_reference = st.text_input('Payment / voucher reference')
+                    mark_paid = st.form_submit_button('Record scholarship payment')
+                if mark_paid:
+                    ix = opts.index(selected_installment)
+                    installment_no = int(pending_installments.iloc[ix].installment_no)
+                    installment_amount = float(pending_installments.iloc[ix].amount)
+                    run("UPDATE scholarship_installments SET status='Paid',paid_date=:paid,payment_reference=:ref WHERE scholarship_id=:sid AND installment_no=:no",
+                        {'paid':paid_date.isoformat(),'ref':payment_reference.strip(),'sid':int(selected_scholarship.id),'no':installment_no})
+                    run('INSERT INTO payments(payment_date,program,category,subcategory,site,payment_purpose,description,recipient,amount,payment_type,reference_no,status,created_by,created_at) VALUES(:d,:p,:c,:sc,:site,:purpose,:desc,:recipient,:amount,:type,:ref,:status,:user,:now)',
+                        {'d':paid_date.isoformat(),'p':'Vidu Saviya','c':selected_scholarship.scholarship_category,'sc':chosen_ref,'site':'Unknown','purpose':'Scholarship installment','desc':f"Installment #{installment_no} · {selected_scholarship.funding_source}",'recipient':selected_scholarship.student_name,'amount':installment_amount,'type':'Scholarship','ref':payment_reference.strip() or chosen_ref,'status':'Paid','user':user['username'],'now':datetime.now().isoformat(timespec='seconds')})
+                    st.success('Scholarship payment recorded.')
+                    st.rerun()
+            output_sch = BytesIO()
+            with pd.ExcelWriter(output_sch, engine='openpyxl') as writer:
+                for idx, source_name in enumerate(funding_options, start=1):
+                    scholarships[scholarships.funding_source == source_name].drop(columns=['id']).to_excel(writer, index=False, sheet_name=f'Scholarships {idx}')
+                all_schedule = df('SELECT s.reference_no,s.funding_source,s.student_name,s.student_id,s.school_or_university,s.scholarship_category,i.installment_no,i.due_date,i.amount,i.status,i.paid_date,i.payment_reference FROM scholarships s JOIN scholarship_installments i ON i.scholarship_id=s.id ORDER BY s.funding_source,s.student_name,i.installment_no')
+                all_schedule.to_excel(writer, index=False, sheet_name='Payment Schedule')
+            st.download_button('Download scholarship workbook (3 sheets + schedule)', output_sch.getvalue(), file_name='vidu_saviya_scholarships.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
 elif page=='Approvals':
     st.subheader('Approval requests'); req=df("SELECT a.id approval_id,a.item_type,a.item_id,a.requested_by,a.decision,a.comments,a.created_at,p.program,p.category,p.site,p.payment_purpose,p.recipient,p.amount,p.payment_type,p.status FROM approvals a LEFT JOIN payments p ON a.item_type='payment' AND p.id=a.item_id ORDER BY a.created_at DESC")
     if req.empty:st.info('There are no approval requests yet.')
