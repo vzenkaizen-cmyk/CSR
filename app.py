@@ -48,11 +48,8 @@ def hash_pw(pw,salt=None):
     salt=salt or secrets.token_hex(16); digest=hashlib.pbkdf2_hmac('sha256',pw.encode(),salt.encode(),180000).hex(); return salt+'$'+digest
 def verify_pw(pw,stored):
     try:
-        salt,digest=stored.split('$',1)
-        calculated_digest=hashlib.pbkdf2_hmac('sha256',pw.encode(),salt.encode(),180000).hex()
-        return hmac.compare_digest(calculated_digest,digest)
-    except (AttributeError, ValueError, TypeError):
-        return False
+        salt,digest=stored.split('',1);returnhmac.comparedigest(hashpw(pw,salt).split('',1)[1],digest)
+    except Exception:return False
 
 @st.cache_resource(show_spinner="Preparing CSR database...")
 def init_db():
@@ -487,10 +484,26 @@ elif page=='Reports':
         excel_summary['Calculation']='Planned budget + approved incoming funds - approved/paid expenses; pending/rejected expenses excluded'
     try:
         output=BytesIO()
+
+        # Excel does not support timezone-aware datetime values. Convert only
+        # timezone-aware datetime columns to timezone-naive values before export.
+        def excel_safe_dataframe(frame):
+            safe = frame.copy()
+            for column in safe.columns:
+                if isinstance(safe[column].dtype, pd.DatetimeTZDtype):
+                    safe[column] = safe[column].dt.tz_localize(None)
+                elif safe[column].dtype == object:
+                    safe[column] = safe[column].map(
+                        lambda value: value.replace(tzinfo=None)
+                        if isinstance(value, datetime) and value.tzinfo is not None
+                        else value
+                    )
+            return safe
+
         with pd.ExcelWriter(output,engine='openpyxl') as writer:
-            (excel_summary if not excel_summary.empty else summary).to_excel(writer,index=False,sheet_name='Budget reconciliation')
-            payments.to_excel(writer,index=False,sheet_name='Payment ledger')
-            plants.to_excel(writer,index=False,sheet_name='Reforestation source and cost')
+            excel_safe_dataframe(excel_summary if not excel_summary.empty else summary).to_excel(writer,index=False,sheet_name='Budget reconciliation')
+            excel_safe_dataframe(payments).to_excel(writer,index=False,sheet_name='Payment ledger')
+            excel_safe_dataframe(plants).to_excel(writer,index=False,sheet_name='Reforestation source and cost')
         st.download_button('Download complete CSR Excel report',output.getvalue(),file_name='vidu_saviya_csr_report.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     except Exception as exc:
         st.warning(f'Excel export is unavailable until openpyxl is installed: {exc}')
