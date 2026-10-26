@@ -48,7 +48,7 @@ def hash_pw(pw,salt=None):
     salt=salt or secrets.token_hex(16); digest=hashlib.pbkdf2_hmac('sha256',pw.encode(),salt.encode(),180000).hex(); return salt+'$'+digest
 def verify_pw(pw,stored):
     try:
-        salt,digest=stored.split('$',1); return hmac.compare_digest(hash_pw(pw,salt).split('$',1)[1],digest)
+        salt,digest=stored.split('',1);returnhmac.comparedigest(hashpw(pw,salt).split('',1)[1],digest)
     except Exception:return False
 
 @st.cache_resource(show_spinner="Preparing CSR database...")
@@ -155,7 +155,7 @@ def init_db():
 init_db()
 
 st.markdown('''<style>
-:root{--green:#147d43;--deep:#064e3b;--pale:#edf7ef} .stApp{background:#fbfdfb;color:#17352a}.block-container{padding-top:0;max-width:1500px}header[data-testid="stHeader"]{height:0;min-height:0;visibility:hidden}div[data-testid="stToolbar"]{visibility:hidden;height:0}.sidebar .sidebar-content{background:#f0f7f2}.stButton>button{background:#147d43;color:white;border:1px solid #147d43;border-radius:9px;font-weight:600}.stButton>button:hover{background:#0b6233;color:white;border-color:#0b6233}.metric-card{background:white;border:1px solid #dbe8de;border-radius:14px;padding:17px 19px;box-shadow:0 4px 16px #12331a0a;min-height:142px;height:auto;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-start;gap:8px}.metric-card h4,.metric-card h3,.metric-card p{margin-top:0;margin-bottom:4px}.page-banner{background:#eaf5fc;padding:12px 20px;border-radius:0 0 12px 12px;margin:0 0 14px 0}.hero{padding:30px;border-radius:20px;background:linear-gradient(120deg,#effaf1,#ffffff);border:1px solid #d8e8da}.muted{color:#648071}.small{font-size:13px;color:#648071}.login-wrap{padding:22px;border-radius:18px;background:#ffffffdc;border:1px solid #d8e5db}
+:root{--green:#147d43;--deep:#064e3b;--pale:#edf7ef} .stApp{background:#fbfdfb;color:#17352a}.block-container{padding-top:0.15rem;max-width:1500px}.sidebar .sidebar-content{background:#f0f7f2}.stButton>button{background:#147d43;color:white;border:1px solid #147d43;border-radius:9px;font-weight:600}.stButton>button:hover{background:#0b6233;color:white;border-color:#0b6233}.metric-card{background:white;border:1px solid #dbe8de;border-radius:14px;padding:17px 19px;box-shadow:0 4px 16px #12331a0a;min-height:142px;height:auto;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-start;gap:8px}.metric-card h4,.metric-card h3,.metric-card p{margin-top:0;margin-bottom:4px}.page-banner{background:#eaf5fc;padding:12px 20px;border-radius:0 0 12px 12px;margin:0 0 14px 0}.hero{padding:30px;border-radius:20px;background:linear-gradient(120deg,#effaf1,#ffffff);border:1px solid #d8e8da}.muted{color:#648071}.small{font-size:13px;color:#648071}.login-wrap{padding:22px;border-radius:18px;background:#ffffffdc;border:1px solid #d8e5db}
 </style>''',unsafe_allow_html=True)
 
 def money(x): return 'LKR '+format(float(x or 0),',.2f')
@@ -493,3 +493,5 @@ elif page=='Reports':
         st.warning(f'Excel export is unavailable until openpyxl is installed: {exc}')
 
 st.divider();st.caption('Vidu Saviya CSR Management · Budget plan 2026–2027 · Store bank account information only in a properly access-controlled deployment.')
+
+
