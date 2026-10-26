@@ -155,7 +155,7 @@ def init_db():
 init_db()
 
 st.markdown('''<style>
-:root{--green:#147d43;--deep:#064e3b;--pale:#edf7ef} header[data-testid="stHeader"]{display:none} .stAppViewContainer .main .block-container,.stAppViewBlockContainer{padding-top:0 !important} .stApp{background:#fbfdfb;color:#17352a}.block-container{padding-top:0 !important;max-width:1500px}.sidebar .sidebar-content{background:#f0f7f2}.stButton>button{background:#147d43;color:white;border:1px solid #147d43;border-radius:9px;font-weight:600}.stButton>button:hover{background:#0b6233;color:white;border-color:#0b6233}.metric-card{background:white;border:1px solid #dbe8de;border-radius:14px;padding:17px 19px;box-shadow:0 4px 16px #12331a0a;min-height:142px;height:auto;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-start;gap:8px}.metric-card h4,.metric-card h3,.metric-card p{margin-top:0;margin-bottom:4px}.page-banner{background:#eaf5fc;padding:12px 20px;border-radius:0 0 12px 12px;margin:0 0 14px 0}.hero{padding:30px;border-radius:20px;background:linear-gradient(120deg,#effaf1,#ffffff);border:1px solid #d8e8da}.muted{color:#648071}.small{font-size:13px;color:#648071}.login-wrap{padding:22px;border-radius:18px;background:#ffffffdc;border:1px solid #d8e5db}
+:root{--green:#147d43;--deep:#064e3b;--pale:#edf7ef} .stApp{background:#fbfdfb;color:#17352a}.block-container{padding-top:0.15rem;max-width:1500px}.sidebar .sidebar-content{background:#f0f7f2}.stButton>button{background:#147d43;color:white;border:1px solid #147d43;border-radius:9px;font-weight:600}.stButton>button:hover{background:#0b6233;color:white;border-color:#0b6233}.metric-card{background:white;border:1px solid #dbe8de;border-radius:14px;padding:17px 19px;box-shadow:0 4px 16px #12331a0a;min-height:142px;height:auto;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-start;gap:8px}.metric-card h4,.metric-card h3,.metric-card p{margin-top:0;margin-bottom:4px}.page-banner{background:#eaf5fc;padding:12px 20px;border-radius:0 0 12px 12px;margin:0 0 14px 0}.hero{padding:30px;border-radius:20px;background:linear-gradient(120deg,#effaf1,#ffffff);border:1px solid #d8e8da}.muted{color:#648071}.small{font-size:13px;color:#648071}.login-wrap{padding:22px;border-radius:18px;background:#ffffffdc;border:1px solid #d8e5db}
 </style>''',unsafe_allow_html=True)
 
 def money(x): return 'LKR '+format(float(x or 0),',.2f')
@@ -190,9 +190,9 @@ def login_page():
     st.markdown(f'''<style>.stApp{{background:linear-gradient(90deg,#ffffff45,#ffffff30),url("data:image/png;base64,{encoded}") center/cover fixed}}</style>''',unsafe_allow_html=True)
     left,right=st.columns([1.08,1],gap='large')
     with left:
-        st.markdown('<div class="hero" style="margin-top:0;min-height:310px"><h3>🌱 VIDU SAVIYA</h3><h1 style="font-size:38px;line-height:1.15;color:#064e3b">Investing in People,<br>Communities and Nature</h1><h4>CSR Management and Monitoring System</h4><p>Education · Community development · Reforestation · Sustainability</p></div>',unsafe_allow_html=True)
+        st.markdown('<div class="hero" style="margin-top:60px;min-height:310px"><h3>🌱 VIDU SAVIYA</h3><h1 style="font-size:38px;line-height:1.15;color:#064e3b">Investing in People,<br>Communities and Nature</h1><h4>CSR Management and Monitoring System</h4><p>Education · Community development · Reforestation · Sustainability</p></div>',unsafe_allow_html=True)
     with right:
-        st.markdown('<div style="height:0"></div>',unsafe_allow_html=True); st.markdown('<div class="login-wrap"><h2>Welcome back</h2><p class="muted">Sign in to your Vidu Saviya account.</p>',unsafe_allow_html=True)
+        st.markdown('<div style="height:38px"></div>',unsafe_allow_html=True); st.markdown('<div class="login-wrap"><h2>Welcome back</h2><p class="muted">Sign in to your Vidu Saviya account.</p>',unsafe_allow_html=True)
         with st.form('login'):
             u=st.text_input('Username',placeholder='Enter username'); p=st.text_input('Password',type='password',placeholder='Enter password'); go=st.form_submit_button('Sign in',use_container_width=True)
         if go:
@@ -484,26 +484,10 @@ elif page=='Reports':
         excel_summary['Calculation']='Planned budget + approved incoming funds - approved/paid expenses; pending/rejected expenses excluded'
     try:
         output=BytesIO()
-
-        # Excel does not support timezone-aware datetime values. Convert only
-        # timezone-aware datetime columns to timezone-naive values before export.
-        def excel_safe_dataframe(frame):
-            safe = frame.copy()
-            for column in safe.columns:
-                if isinstance(safe[column].dtype, pd.DatetimeTZDtype):
-                    safe[column] = safe[column].dt.tz_localize(None)
-                elif safe[column].dtype == object:
-                    safe[column] = safe[column].map(
-                        lambda value: value.replace(tzinfo=None)
-                        if isinstance(value, datetime) and value.tzinfo is not None
-                        else value
-                    )
-            return safe
-
         with pd.ExcelWriter(output,engine='openpyxl') as writer:
-            excel_safe_dataframe(excel_summary if not excel_summary.empty else summary).to_excel(writer,index=False,sheet_name='Budget reconciliation')
-            excel_safe_dataframe(payments).to_excel(writer,index=False,sheet_name='Payment ledger')
-            excel_safe_dataframe(plants).to_excel(writer,index=False,sheet_name='Reforestation source and cost')
+            (excel_summary if not excel_summary.empty else summary).to_excel(writer,index=False,sheet_name='Budget reconciliation')
+            payments.to_excel(writer,index=False,sheet_name='Payment ledger')
+            plants.to_excel(writer,index=False,sheet_name='Reforestation source and cost')
         st.download_button('Download complete CSR Excel report',output.getvalue(),file_name='vidu_saviya_csr_report.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     except Exception as exc:
         st.warning(f'Excel export is unavailable until openpyxl is installed: {exc}')
