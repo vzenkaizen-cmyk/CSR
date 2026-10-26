@@ -226,9 +226,9 @@ if page=='Overview':
     total_budget=summaries.budget.sum() if not summaries.empty else 0; total_spent=summaries.spent.sum() if not summaries.empty else 0; total_unspent=summaries.unspent.sum() if not summaries.empty else 0
     overview_counts = df("SELECT \
         (SELECT COUNT(*) FROM approvals WHERE decision='Pending') AS pending, \
-        (SELECT COALESCE(SUM(quantity),0) FROM planting) AS planted, \
-        (SELECT COUNT(*) FROM nursery) AS nursery_count, \
-        (SELECT COUNT(*) FROM payments) AS payment_count")
+        (SELECT COALESCE(SUM(quantity),0) FROM planting WHERE (:site='All sites' OR site=:site)) AS planted, \
+        (SELECT COALESCE(SUM(quantity),0) FROM nursery WHERE (:site='All sites' OR site=:site)) AS nursery_count, \
+        (SELECT COUNT(*) FROM payments WHERE (:site='All sites' OR site=:site)) AS payment_count", {'site': site})
     count_row = overview_counts.iloc[0]
     pending = int(count_row['pending'] or 0)
     planted = int(count_row['planted'] or 0)
@@ -245,8 +245,12 @@ if page=='Overview':
         st.write('')  # Keep a clear gap after programme summary cards.
         st.subheader('Budget by category'); st.dataframe(summaries.groupby(['program','category'],as_index=False)[['budget','spent','unspent']].sum().style.format({'budget':'{:,.2f}','spent':'{:,.2f}','unspent':'{:,.2f}'}),use_container_width=True,hide_index=True)
     st.subheader('Reforestation overview')
-    n1,n2,n3=st.columns(3);n1.metric('Trees recorded as planted',f'{planted:,}');n2.metric('Nursery species tracked',int(count_row['nursery_count'] or 0));n3.metric('Payment requests',int(count_row['payment_count'] or 0))
-    st.caption('Budget seed values were imported from the supplied CSR BP 2026–2027 workbook. Spend is counted only after a payment is approved or marked Paid.')
+    n1,n2,n3=st.columns(3);n1.metric('Total plants / seeds planted',f'{planted:,}');n2.metric('Plants currently in nursery',f"{int(count_row['nursery_count'] or 0):,}");n3.metric('Payment requests',int(count_row['payment_count'] or 0))
+    source_totals = df("SELECT source_type, COALESCE(SUM(quantity),0) AS quantity FROM planting WHERE (:site='All sites' OR site=:site) GROUP BY source_type ORDER BY source_type", {'site': site})
+    if not source_totals.empty:
+        st.subheader('Plants planted by source')
+        st.dataframe(source_totals.rename(columns={'source_type':'Planting source','quantity':'Total plants / seeds'}), use_container_width=True, hide_index=True)
+    st.caption('Budget seed values were imported from the supplied CSR BP 2026–2027 workbook. Spend is counted only after a payment is approved or marked Paid. Nursery stock is the current remaining quantity; planting records include nursery plants, seed planting, purchased plants and donated plants.')
 elif page in PROGRAMS or page in ['Daruwanta Diriyak','Ratata Sewanak','Gamata Eliyak','Lowata Aruthak','Vidu Saviya']:
     prog=page; site=st.selectbox('Power plant / site',site_options[1:],key='program_site_'+prog)
     cat_opts=CATEGORIES[prog]
@@ -272,6 +276,12 @@ elif page in PROGRAMS or page in ['Daruwanta Diriyak','Ratata Sewanak','Gamata E
                 pid=int(df('SELECT MAX(id) id FROM payments').iloc[0].id);run('INSERT INTO approvals(item_type,item_id,requested_by,decision,created_at) VALUES(:t,:i,:u,:d,:now)',{'t':'payment','i':pid,'u':user['username'],'d':'Pending','now':datetime.now().isoformat(timespec='seconds')});st.success('Payment saved and sent to Approvals.');st.rerun()
         st.subheader('Payment history'); history=df('SELECT payment_date,category,payment_purpose,recipient,amount,payment_type,status,reference_no FROM payments WHERE program=:p AND site=:s ORDER BY payment_date DESC',{'p':prog,'s':site})
         st.dataframe(history.style.format({'amount':'LKR {:,.2f}'}),use_container_width=True,hide_index=True)
+        st.subheader('How the category budget has been used')
+        category_budget = summ[['category','budget','spent','unspent']].copy() if not summ.empty else pd.DataFrame(columns=['category','budget','spent','unspent'])
+        if not category_budget.empty:
+            category_budget['Budget calculation'] = category_budget.apply(lambda r: f"{money(r['budget'])} budget − {money(r['spent'])} approved / paid expenses = {money(r['unspent'])} unspent", axis=1)
+            st.dataframe(category_budget[['category','budget','spent','unspent','Budget calculation']].style.format({'budget':'LKR {:,.2f}','spent':'LKR {:,.2f}','unspent':'LKR {:,.2f}'}),use_container_width=True,hide_index=True)
+        st.caption('The remaining budget is calculated from the existing category budget plus approved incoming funds, minus expenses marked Approved or Paid. Pending and rejected expenses are listed in the payment history but do not reduce the available budget.')
 
     if prog == 'Daruwanta Diriyak' and one_time_tab is not None:
         with one_time_tab:
@@ -321,13 +331,16 @@ elif page=='CSR Database':
 elif page=='Reforestation & Nursery':
     st.subheader('Reforestation · Nursery and planting'); st.caption('Only plants marked “Taken from nursery” reduce nursery stock. Plants sourced outside are added to trees planted without reducing nursery stock. Associated costs are recorded against Ratata Sewanak → Reforestation and reduce the available budget only after approval/payment.')
     with st.form('nursery_add'):
-        c1,c2,c3=st.columns(3);ns=c1.selectbox('Site',sorted(SITES));pn=c2.text_input('Plant / species name');qty=c3.number_input('Current quantity',min_value=0,step=1);save=st.form_submit_button('Add / set nursery stock')
+        c1,c2,c3,c4=st.columns(4);ns=c1.selectbox('Site',sorted(SITES));pn=c2.text_input('Plant / species name');qty=c3.number_input('Quantity to add / set',min_value=0,step=1);stock_action=c4.selectbox('Stock action',['Add quantity to nursery','Set total nursery quantity']);save=st.form_submit_button('Save nursery stock')
     if save and pn.strip():
-        old=df('SELECT id FROM nursery WHERE site=:s AND plant_name=:p',{'s':ns,'p':pn.strip()})
+        old=df('SELECT id,quantity FROM nursery WHERE site=:s AND plant_name=:p',{'s':ns,'p':pn.strip()})
         if old.empty:run('INSERT INTO nursery(site,plant_name,quantity,updated_at,updated_by) VALUES(:s,:p,:q,:t,:u)',{'s':ns,'p':pn.strip(),'q':int(qty),'t':datetime.now().isoformat(timespec='seconds'),'u':user['username']})
-        else:run('UPDATE nursery SET quantity=:q,updated_at=:t,updated_by=:u WHERE site=:s AND plant_name=:p',{'q':int(qty),'t':datetime.now().isoformat(timespec='seconds'),'u':user['username'],'s':ns,'p':pn.strip()})
-        st.success('Nursery stock saved.');st.rerun()
+        else:
+            new_qty=int(qty) if stock_action=='Set total nursery quantity' else int(old.iloc[0].quantity)+int(qty)
+            run('UPDATE nursery SET quantity=:q,updated_at=:t,updated_by=:u WHERE site=:s AND plant_name=:p',{'q':new_qty,'t':datetime.now().isoformat(timespec='seconds'),'u':user['username'],'s':ns,'p':pn.strip()})
+        st.success('Nursery stock updated. Added quantities increase the existing stock; plants taken from the nursery are deducted when a planting record is saved.');st.rerun()
     inventory=df('SELECT site,plant_name,quantity,updated_at,updated_by FROM nursery ORDER BY site,plant_name');st.dataframe(inventory,use_container_width=True,hide_index=True)
+    st.metric('Total plants currently in nursery', f"{int(inventory['quantity'].sum()) if not inventory.empty else 0:,}")
     st.subheader('Record seed planting or tree planting')
     with st.form('planting'):
         c1,c2,c3=st.columns(3);ps=c1.selectbox('Site',sorted(SITES),key='plant_site');pdte=c2.date_input('Planting date',date.today());loc=c3.text_input('Location')
@@ -348,6 +361,11 @@ elif page=='Reforestation & Nursery':
                 run('INSERT INTO payments(payment_date,program,category,subcategory,site,payment_purpose,description,amount,payment_type,status,created_by,created_at) VALUES(:d,:p,:c,:sc,:s,:pu,:de,:a,:pt,:st,:u,:t)',{'d':pdte.isoformat(),'p':'Ratata Sewanak','c':'Reforestation','sc':source,'s':ps,'pu':'Tree / seed planting','de':f'{quantity} × {species} ({source})','a':total,'pt':'Reforestation cost','st':'Pending','u':user['username'],'t':datetime.now().isoformat(timespec='seconds')});pid=int(df('SELECT MAX(id) id FROM payments').iloc[0].id);run('INSERT INTO approvals(item_type,item_id,requested_by,decision,created_at) VALUES(:t,:i,:u,:d,:now)',{'t':'payment','i':pid,'u':user['username'],'d':'Pending','now':datetime.now().isoformat(timespec='seconds')})
             st.success('Planting record saved. Associated cost was added as a pending payment for approval.');st.rerun()
     planted=df('SELECT site,planted_date,location,plant_name,quantity,source_type,unit_cost,total_cost,notes FROM planting ORDER BY planted_date DESC');st.subheader('Planting records');st.dataframe(planted.style.format({'unit_cost':'LKR {:,.2f}','total_cost':'LKR {:,.2f}'}),use_container_width=True,hide_index=True)
+    if not planted.empty:
+        st.subheader('Total plants / seeds planted by source')
+        planted_by_source=planted.groupby('source_type',as_index=False)['quantity'].sum().rename(columns={'source_type':'Planting source','quantity':'Total plants / seeds planted'})
+        st.dataframe(planted_by_source,use_container_width=True,hide_index=True)
+        st.metric('Total plants / seeds planted', f"{int(planted['quantity'].sum()):,}")
 elif page=='Reports':
     st.subheader('CSR reports and exports')
     with st.expander('Record incoming funds / budget addition'):
